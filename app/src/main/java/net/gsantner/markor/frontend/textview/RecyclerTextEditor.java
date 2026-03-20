@@ -54,8 +54,8 @@ public class RecyclerTextEditor extends RecyclerView implements MarkorEditor {
     private Typeface _typeface;
     private boolean _wrapEnabled = true;
 
-    private int _selectionStart;
-    private int _selectionEnd;
+    public int _selectionStart;
+    public int _selectionEnd;
     private InputFilter _autoFormatFilter;
     private TextWatcher _autoFormatModifier;
     private boolean _autoFormatEnabled;
@@ -67,6 +67,8 @@ public class RecyclerTextEditor extends RecyclerView implements MarkorEditor {
     private boolean _suppressSelectionSync;
     private View.OnFocusChangeListener _externalFocusChangeListener;
 
+    private RecyclerSelectionManager _selectionManager;
+
     public RecyclerTextEditor(@NonNull Context context) {
         this(context, null);
     }
@@ -76,8 +78,17 @@ public class RecyclerTextEditor extends RecyclerView implements MarkorEditor {
         setLayoutManager(new LinearLayoutManager(context));
         setAdapter(_adapter);
         setItemAnimator(null);
+
+        _selectionManager = new RecyclerSelectionManager(this);
+        addItemDecoration(_selectionManager);
+        addOnItemTouchListener(_selectionManager);
+
         _lines.add("");
         syncEditorTextFromLines();
+    }
+
+    public RecyclerSelectionManager getSelectionManager() {
+        return _selectionManager;
     }
 
     @Override
@@ -532,7 +543,7 @@ public class RecyclerTextEditor extends RecyclerView implements MarkorEditor {
         return Math.max(0, Math.min(value, _editorText.length()));
     }
 
-    private int[] globalOffsetToLineCol(int offset) {
+    public int[] globalOffsetToLineCol(int offset) {
         if (_lines.isEmpty()) {
             return new int[]{0, 0};
         }
@@ -560,7 +571,7 @@ public class RecyclerTextEditor extends RecyclerView implements MarkorEditor {
         return new int[]{lastIndex, _lines.get(lastIndex).length()};
     }
 
-    private int lineColToGlobalOffset(int lineIndex, int column) {
+    public int lineColToGlobalOffset(int lineIndex, int column) {
         if (_lines.isEmpty()) {
             return 0;
         }
@@ -634,7 +645,7 @@ public class RecyclerTextEditor extends RecyclerView implements MarkorEditor {
         return null;
     }
 
-    private void refreshVisibleLineEditors(boolean includeFocused) {
+    public void refreshVisibleLineEditors(boolean includeFocused) {
         final LayoutManager lm = getLayoutManager();
         if (!(lm instanceof LinearLayoutManager)) {
             return;
@@ -662,15 +673,43 @@ public class RecyclerTextEditor extends RecyclerView implements MarkorEditor {
 
     @NonNull
     private CharSequence getLineDisplayText(int position) {
-        if (!_hlEnabled || _highlighter == null) {
-            return _lines.get(position);
-        }
+        CharSequence displayText;
         final int start = lineStartOffset(position);
         final int end = Math.min(start + _lines.get(position).length(), _editorText.length());
-        if (start <= end) {
-            return _editorText.subSequence(start, end);
+
+        if (!_hlEnabled || _highlighter == null) {
+            displayText = _lines.get(position);
+        } else {
+            if (start <= end) {
+                displayText = _editorText.subSequence(start, end);
+            } else {
+                displayText = _lines.get(position);
+            }
         }
-        return _lines.get(position);
+
+        // Apply custom selection highlight
+        if (_selectionManager != null && _selectionManager.hasSelection()) {
+            int selStart = _selectionManager.getSelectionStart();
+            int selEnd = _selectionManager.getSelectionEnd();
+
+            // Check if selection overlaps with this line
+            if (selEnd >= start && selStart <= end) {
+                int localSelStart = Math.max(0, selStart - start);
+                int localSelEnd = Math.min(displayText.length(), selEnd - start);
+
+                if (localSelStart < localSelEnd) {
+                    SpannableStringBuilder ssb = new SpannableStringBuilder(displayText);
+                    // Use a BackgroundColorSpan to highlight the text
+                    // Get system highlight color
+                    int highlightColor = TextViewUtils.getHighlightColor(getContext());
+                    ssb.setSpan(new android.text.style.BackgroundColorSpan(highlightColor),
+                            localSelStart, localSelEnd, SpannableStringBuilder.SPAN_EXCLUSIVE_EXCLUSIVE);
+                    displayText = ssb;
+                }
+            }
+        }
+
+        return displayText;
     }
 
     private void notifyTextChanged() {
@@ -762,6 +801,17 @@ public class RecyclerTextEditor extends RecyclerView implements MarkorEditor {
             if (_watcher != null) {
                 _edit.removeTextChangedListener(_watcher);
             }
+
+            // Disable native ActionMode to let RecyclerSelectionManager handle it uniformly
+            _edit.setCustomSelectionActionModeCallback(new android.view.ActionMode.Callback() {
+                @Override public boolean onCreateActionMode(android.view.ActionMode mode, android.view.Menu menu) { return false; }
+                @Override public boolean onPrepareActionMode(android.view.ActionMode mode, android.view.Menu menu) { return false; }
+                @Override public boolean onActionItemClicked(android.view.ActionMode mode, android.view.MenuItem item) { return false; }
+                @Override public void onDestroyActionMode(android.view.ActionMode mode) {}
+            });
+            // Disable native text selection to enforce custom selection
+            _edit.setTextIsSelectable(false);
+            _edit.setFocusableInTouchMode(true); // Ensure focus isn't lost
 
             _edit.setTag(position);
             _suppressSelectionSync = true;
