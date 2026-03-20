@@ -112,6 +112,18 @@ public final class TextViewUtils {
         return -1;
     }
 
+    /**
+     * Get the current theme's text highlight color.
+     */
+    public static int getHighlightColor(Context context) {
+        android.util.TypedValue typedValue = new android.util.TypedValue();
+        android.content.res.Resources.Theme theme = context.getTheme();
+        if (theme.resolveAttribute(android.R.attr.textColorHighlight, typedValue, true)) {
+            return typedValue.data;
+        }
+        return android.graphics.Color.LTGRAY; // Fallback
+    }
+
     public static int[] getSelection(final TextView text) {
         return getSelection(text.getText());
     }
